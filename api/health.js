@@ -1,9 +1,5 @@
 import { DEFAULT_CROP_MODEL_API_URL, DEFAULT_SENSOR_API_URL, json } from '../server/apiUtils.js';
 
-function localFallbacksEnabled() {
-  return process.env.VERCEL !== '1' && process.env.LOCAL_API_FALLBACKS !== 'false';
-}
-
 export default function handler(req, res) {
   const sensorApiUrl = process.env.SENSOR_API_URL || DEFAULT_SENSOR_API_URL;
   const cropModelApiUrl = process.env.CROP_MODEL_API_URL || DEFAULT_CROP_MODEL_API_URL;
@@ -13,13 +9,11 @@ export default function handler(req, res) {
     timestamp: new Date().toISOString(),
     demo_mode: false,
     sensor_api: {
-      available: localFallbacksEnabled(),
+      available: null,
       configured: Boolean(sensorApiUrl),
       using_default: !process.env.SENSOR_API_URL,
       url: sensorApiUrl || null,
-      message: localFallbacksEnabled()
-        ? 'Local sensor fallback is active when Render sensor API is unavailable.'
-        : process.env.SENSOR_API_URL ? 'Sensor API configured.' : 'Using default Render sensor API.',
+      message: 'FarmSense telemetry service configured; availability comes from live sensor requests.',
     },
     weather_api: {
       available: true,

@@ -82,6 +82,10 @@ function normalizeSensorPayload(payload, fallbackSource = 'hardware') {
     health_score: data.health_score ?? data.healthScore ?? null,
     timestamp: data.timestamp || payload?.received_at || null,
     source,
+    device_online: data.device_online ?? payload?.device_online ?? null,
+    control_mode: data.control_mode ?? null,
+    control_reason: data.control_reason ?? null,
+    applied_command_id: data.applied_command_id ?? null,
   };
 }
 
@@ -129,10 +133,11 @@ export function getRemoteIrrigation() {
   return fetchJson('/api/irrigation/remote');
 }
 
-export function setRemoteIrrigation(enabled) {
+export function setRemoteIrrigation(mode, durationSeconds, operatorKey) {
   return fetchJson('/api/irrigation/remote', {
     method: 'POST',
-    body: JSON.stringify({ enabled: Boolean(enabled) }),
+    headers: { Authorization: `Bearer ${operatorKey}` },
+    body: JSON.stringify({ mode, ...(mode === 'remote_on' ? { duration_seconds: durationSeconds } : {}) }),
   });
 }
 

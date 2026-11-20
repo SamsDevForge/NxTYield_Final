@@ -1,112 +1,111 @@
-# FarmSense AI hardware reference
+# FarmSense AI controller
 
-The FarmSense controller uses an **Arduino UNO R4 WiFi** with a **BME280** for air temperature, humidity and pressure. This guide records the hardware details supplied by the project maintainer and the accompanying reconstructed sketch.
+Firmware for the **Arduino UNO R4 WiFi**, using **BME280** for air temperature, humidity and pressure. It reads the field sensors, drives a local LCD and relay, posts JSON telemetry to FastAPI, and applies commands returned by the server.
 
-The sketch is a reconstruction, not the recovered event firmware. It has not been compiled or checked against a connected FarmSense rig in this update.
+This code extends the maintainer-supplied reconstruction. It is not recovered event firmware. Board compilation and software tests are separate from physical sensor, wiring and pump validation.
 
-## Hardware and readings
+## Hardware and pin map
 
-| Component | Interface | Reading or function |
-| --- | --- | --- |
-| Arduino UNO R4 WiFi | Controller | Reads sensors, drives the LCD and relay |
-| SEN0193 | Analog A0 | Relative moisture percentage after calibration |
-| DS18B20 | OneWire on D3 | Soil temperature in °C |
-| BME280 | I2C, configured at 0x76 | Air temperature in °C, humidity in % RH, pressure in hPa |
-| LM393 rain module | Digital D2 | Rain detected / not detected |
-| SN-3002-TR-N-N-NPK-N01 | RS485 / MAX485 | Nitrogen, phosphorus and potassium register values |
-| 16×2 LCD | I2C, configured at 0x27 | Moisture, soil temperature, rain and pump state |
-| Relay / pump | Digital D4 | Irrigation output |
-
-The pH probe was not working in the prototype. pH values used for demonstration were simulated. The supplied controller sketch does not read or emit pH.
-
-## Reference pin map
-
-| UNO R4 WiFi pin | Connection |
+| UNO R4 WiFi connection | Component / purpose |
 | --- | --- |
-| A0 | SEN0193 analog output |
-| D2 | LM393 rain module digital output |
+| A0 | SEN0193 analog moisture output |
+| D2 | LM393 rain digital output, LOW means rain |
 | D3 | DS18B20 OneWire data |
-| D4 | Relay control input |
+| D4 | Relay input, active LOW in this sketch |
 | D5 | MAX485 DE and /RE direction control |
 | D0 / RX | MAX485 RO |
 | D1 / TX | MAX485 DI |
-| SDA / A4 | BME280 and LCD SDA |
+| SDA / A4 | BME280 and 16×2 LCD SDA |
 | SCL / A5 | BME280 and LCD SCL |
 
-`Serial` provides the USB monitor output at 115200 baud. `Serial1` is used for the NPK UART at 4800 baud in this reconstruction. Arduino's [UNO R4 WiFi manual](https://docs.arduino.cc/tutorials/uno-r4-wifi/cheat-sheet) distinguishes USB `Serial` from the D0/D1 `Serial1` UART.
+`Serial` is USB debugging at 115200 baud. `Serial1` is the D0/D1 NPK UART at 4800 baud. See the [UNO R4 manual](https://docs.arduino.cc/tutorials/uno-r4-wifi/cheat-sheet).
 
-Match power, pull-ups and logic levels to the actual breakout modules. The bare BME280 is a low-voltage device; use an appropriate breakout or level shifting with the UNO R4's 5 V interface. See the [Bosch specifications](https://www.bosch-sensortec.com/en/products/environmental-sensors/humidity-sensors-bme280).
+Match power, grounds, pull-ups and logic levels to the actual breakout modules, including the DS18B20 data pull-up. The bare BME280 is a low-voltage device; use a compatible breakout or level shifting with the UNO R4's 5 V interface. Check the [Bosch specifications](https://www.bosch-sensortec.com/en/products/environmental-sensors/humidity-sensors-bme280).
 
-## Arduino setup
+## Install and configure
 
-1. Install the **Arduino UNO R4 Boards** package in Arduino IDE and select **Arduino UNO R4 WiFi**.
-2. Install these libraries through Library Manager:
-   - Adafruit BME280 Library
-   - Adafruit Unified Sensor
-   - OneWire
-   - DallasTemperature
-   - LiquidCrystal_I2C, with `init()` and `backlight()` support
-   - ModbusMaster
+1. Install **Arduino UNO R4 Boards** and select **Arduino UNO R4 WiFi**. The tested core is `arduino:renesas_uno@1.6.0`.
+2. Install these libraries in Arduino IDE's Library Manager:
+
+   | Library | Version used by CI |
+   | --- | --- |
+   | Adafruit BME280 Library | 2.3.0 |
+   | Adafruit Unified Sensor / Adafruit BusIO | Installed as BME280 dependencies |
+   | OneWire | 2.3.8 |
+   | DallasTemperature | 4.0.6 |
+   | LiquidCrystal I2C | 1.1.2 |
+   | ModbusMaster | 2.0.1 |
+   | ArduinoHttpClient | 0.6.2 |
+   | ArduinoJson | 7.4.3 (version 7 API) |
+
+   WiFiS3/WiFiSSLClient come with the board core. The LCD library declares AVR support and emits a warning on this board; compilation is checked, but the actual backpack still needs testing.
+
 3. Open [FarmSenseAI/FarmSenseAI.ino](FarmSenseAI/FarmSenseAI.ino).
-4. Verify the configuration below against the actual rig before upload. This repository update does not flash hardware.
+4. Copy [arduino_secrets.example.h](FarmSenseAI/arduino_secrets.example.h) to **`arduino_secrets.h`** in the same folder. The real file is gitignored. Without it the sketch compiles with placeholders and does not join WiFi.
+5. Configure WiFi, device ID, device API key, hostname, port and TLS. Use the [backend setup guide](../backend/README.md) to match the keys and addresses.
+6. Verify configuration and compile before upload:
 
-## Reconstruction settings
+   ```bash
+   arduino-cli compile --fqbn arduino:renesas_uno:unor4wifi hardware/FarmSenseAI
+   ```
 
-| Setting | Sketch value | What to verify |
+Keep a pump disconnected while validating relay polarity and sensor behavior.
+
+## Calibration and protocol settings
+
+| Setting | Default | What to verify |
 | --- | --- | --- |
-| BME280 I2C address | 0x76 | Actual breakout address; some use 0x77 |
-| LCD I2C address | 0x27 | Actual backpack address |
-| Soil dry reading | 800 | Measure with the actual sensor and ADC configuration |
-| Soil wet reading | 350 | Measure with the actual sensor and ADC configuration |
-| Rain detection | LOW means rain | Check the module's digital output polarity |
-| Relay polarity | Active LOW | Match the installed relay |
-| NPK slave ID | 1 | Probe configuration |
-| NPK baud rate | 4800 | Probe configuration |
-| NPK starting register | 0x001E, three registers | **Example only**; confirm the probe's register map, scaling, units and serial format |
+| ADC resolution | 10 bits | Explicitly configured for this calibration |
+| Moisture dry / wet | 800 / 350 | Measure both values with the installed SEN0193 |
+| BME280 address | Try 0x76, then 0x77 | Actual sensor address and voltage compatibility |
+| LCD address | 0x27 | Actual I2C backpack address |
+| Rain / relay polarity | Active LOW | Match the installed modules |
+| NPK UART / slave | 4800 baud / slave 1 | Exact probe settings, including serial format |
+| NPK register | 0x001E, three holding registers | **Example only:** confirm address, order, scaling and nutrient units |
+| NPK enabled | `NPK_PROTOCOL_CONFIRMED = false` | Enable only after the protocol and data interpretation are confirmed |
 
-The moisture percentage is a linear mapping between the configured dry/wet readings, constrained to 0–100. It is not a calibrated volumetric water-content measurement.
+Moisture is a relative 0–100% calibration, not volumetric water content. ADC rail readings are rejected; this does not detect every possible sensor failure.
 
-## Irrigation behavior
+NPK communication failures emit null values rather than reusing an older sample. Confirm the probe's register units/scaling against the dashboard's nutrient units before enabling it; adapt conversion code if required. The pH probe was not working in the prototype, so firmware always sends `ph: null`.
 
-The supplied reconstruction uses:
+## Irrigation control
 
-```text
-rain detected                 → pump OFF
-no rain and moisture < 35%     → pump ON
-no rain and moisture >= 35%    → pump OFF
-```
-
-Rain has priority. There is no separate hysteresis band, maximum run-time control, or remote-command handling in this reference sketch.
-
-The loop reads the sensors, applies that rule, refreshes the LCD, writes a serial report, and then waits two seconds. Blocking sensor and Modbus reads add to that interval.
-
-## Validity and integration limits
-
-- If BME280 initialization fails, the sketch reports that error. A downstream gateway must treat environmental measurements as unavailable until the sensor is working.
-- An NPK communication failure prints an error and leaves earlier values in memory. A gateway must track freshness instead of treating them as a new successful sample.
-- The register values are not assigned a confirmed nutrient unit or scaling factor here; consult the exact probe's documentation.
-- The sketch prints human-readable text, not JSON or HTTP requests.
-- The board has WiFi capability, but this sketch does not implement WiFi telemetry or a serial-to-API bridge.
-- The crop recommendation model is a separate Python/ML service. This sketch does not perform model inference.
-
-### Dashboard field names
-
-The existing web API normalizes fields such as:
-
-| Controller value | Dashboard/API field |
+| Condition / mode | Relay behavior |
 | --- | --- |
-| Relative soil moisture | `moisture` |
-| DS18B20 temperature | `soil_temperature` |
-| BME280 temperature | `air_temperature` |
-| BME280 relative humidity | `humidity` |
-| BME280 pressure | `pressure` |
-| N, P, K | `nitrogen`, `phosphorus`, `potassium` |
-| Rain indication | `rain_detected` |
-| Actual irrigation state | `irrigation_active` |
-| Sample time | `timestamp` |
+| Startup | OFF until the first valid server command |
+| Rain detected | OFF in every mode |
+| Moisture unavailable | OFF in Auto and timed watering |
+| Auto | Start below 35%; stop at 45%; retain state within that band |
+| Water now | ON for the remaining server-issued lease, subject to interlocks |
+| Stop | OFF until another command |
+| Remote lease expires | OFF; a new command is needed |
+| No successful server response for 15 seconds during remote watering | OFF; the same command cannot restart it |
+| Five-minute continuous runtime reached | OFF; latched until a new command, or in Auto until soil reaches the stop threshold |
 
-A future bridge should send valid, current readings, use `null` for unavailable measurements, and keep simulated pH separate from hardware measurements. See [the API normalizer](../server/apiUtils.js) and [frontend API adapter](../src/lib/api.js).
+The backend accepts 5–300 second timed commands, refuses new starts when the controller is offline, and binds a timed command to the reported boot ID. Receiving the same command never extends its local timer. Rebooting the controller begins with the relay off and cannot resume a command issued to a different boot session.
 
-## Provenance
+Auto control can continue locally during a server outage once selected. Stop is a persistent mode, distinct from Auto. When the controller is offline, a server-side Stop remains queued; it is not an immediate physical emergency switch.
 
-The project maintainer supplied the component list and reconstructed Arduino code. The reconstruction is preserved in the sketch after a provenance comment; its register settings and calibration remain to be verified on hardware.
+These sensor and HTTP libraries use synchronous operations. Control checks run before and after them, not during a blocked call. Connection and response timeouts are set to 2.5 seconds; real stop latency also depends on sensor/WiFi libraries and must be measured on the rig.
+
+## HTTP telemetry and acknowledgment
+
+The controller posts to **`/telemetry`** approximately every two seconds plus processing time, with `Authorization: Bearer <device-key>`. It uses `WiFiSSLClient` for HTTPS or `WiFiClient` for local HTTP.
+
+| Field | Meaning |
+| --- | --- |
+| `device_id`, `boot_id`, `sequence`, `uptime_ms` | Controller identity, session and packet order |
+| `moisture` | Relative moisture percentage |
+| `soil_temperature` | DS18B20 °C, or null if invalid/disconnected |
+| `air_temperature`, `humidity`, `pressure` | BME280 °C / % RH / hPa, or null when unavailable |
+| `nitrogen`, `phosphorus`, `potassium` | Confirmed probe values, otherwise null |
+| `ph` | Null until a working physical pH integration is added |
+| `rain_detected` | Rain input state |
+| `irrigation_active` | Actual commanded relay output; not measured water flow |
+| `control_mode`, `control_reason` | Applied control mode and active interlock/reason |
+| `applied_command_id` | Last command accepted by the controller |
+| `sensor_errors` | Sensor/protocol availability notes |
+
+Each successful response carries `command_id`, `mode`, `remaining_seconds` and related command metadata. The controller applies it locally; the next telemetry packet acknowledges it and reports relay state. The server timestamps samples and marks them stale after its configured freshness window.
+
+See the [FastAPI HTTP contract](../backend/README.md#http-contract) for request examples, endpoint roles, hosting and dashboard configuration. Crop inference remains in the separate ML service; it does not run on this Arduino.

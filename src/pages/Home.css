@@ -576,8 +576,15 @@
 }
 
 .irr-options-remote {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+
+.irr-field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--text-muted); }
+.irr-field input, .irr-field select { width: 100%; min-width: 0; padding: 0.65rem; border: 1px solid rgba(100, 130, 110, 0.5); border-radius: var(--radius-sm); background: #141d18; color: var(--text-main); font: inherit; }
+.irr-field input:focus-visible, .irr-field select:focus-visible { outline: 2px solid var(--color-success); outline-offset: 2px; }
+.irr-note { margin: 0.7rem 0 0; font-size: 0.65rem; line-height: 1.5; color: var(--text-muted); }
+.irr-countdown { font-family: var(--font-mono); color: var(--color-blue); }
+.irrigation-control .irr-timer-detail { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.5; }
 
 .irr-option {
   min-width: 0;

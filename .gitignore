@@ -26,3 +26,17 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# FarmSense runtime data and private credentials
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+data/
+*.sqlite3*
+hardware/FarmSenseAI/arduino_secrets.h
+test-results/
+playwright-report/

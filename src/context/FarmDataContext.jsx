@@ -46,6 +46,11 @@ function persistDemoMode(enabled) {
 function readingKey(reading) {
   if (!reading) return '';
   return [
+    reading.available,
+    reading.device_online,
+    reading.control_mode,
+    reading.control_reason,
+    reading.applied_command_id,
     reading.source,
     reading.timestamp,
     reading.nitrogen,
@@ -271,7 +276,7 @@ export function FarmDataProvider({ children }) {
         setApiError('stream', 'Live sensor stream not available');
       },
       onMessage: (reading) => {
-        setConnected(true);
+        setConnected(reading.available !== false);
         setApiError('stream', '');
         applyReading(reading);
       },

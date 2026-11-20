@@ -1,0 +1,12 @@
+.git
+node_modules
+dist
+**/.venv
+**/.env
+**/.env.local
+**/.env.*
+!backend/.env.example
+**/__pycache__
+**/.pytest_cache
+**/data
+**/arduino_secrets.h

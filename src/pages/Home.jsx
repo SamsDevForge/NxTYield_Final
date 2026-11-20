@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, Droplets, CloudSun, Wifi, Sprout, Thermometer, Wind, FlaskConical, Zap } from 'lucide-react';
+import { Activity, Droplets, CloudSun, Wifi, Sprout, Thermometer, Wind, FlaskConical } from 'lucide-react';
 import DigitalFarmTwin from '../components/DigitalFarmTwin';
 import { useFarmData } from '../context/FarmDataContext';
-import { getRemoteIrrigation, setRemoteIrrigation } from '../lib/api';
+import RemoteIrrigation from '../components/RemoteIrrigation';
 import {
   buildAlerts,
   compactValue,
@@ -125,11 +125,6 @@ const sensorDefinitions = [
   },
 ];
 
-const remoteIrrigationOptions = [
-  { value: false, label: 'Relay', detail: 'Auto logic' },
-  { value: true, label: 'Start', detail: 'Pump on' },
-];
-
 function buildSensorData(latest) {
   return sensorDefinitions.map((sensor) => {
     const value = latest?.[sensor.field] ?? null;
@@ -185,38 +180,8 @@ function DashboardArrivalTransition() {
 
 function Home() {
   const { latest, connected, insights, summary, weather, refreshInsights } = useFarmData();
-  const [remoteIrrigation, setRemoteIrrigationState] = useState({ enabled: false, mode: 'relay_logic', updated_at: null });
-  const [irrigationLoading, setIrrigationLoading] = useState(false);
-  const [irrigationError, setIrrigationError] = useState('');
   const [showArrival, setShowArrival] = useState(false);
   const arrivalRequestedRef = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRemoteIrrigation() {
-      try {
-        const command = await getRemoteIrrigation();
-        if (cancelled) return;
-        setRemoteIrrigationState({
-          enabled: Boolean(command.enabled),
-          mode: command.mode || (command.enabled ? 'remote_on' : 'relay_logic'),
-          updated_at: command.updated_at || null,
-        });
-        setIrrigationError(command.available === false ? command.message || 'Irrigation API not available' : '');
-      } catch (error) {
-        if (!cancelled) setIrrigationError(error.message || 'Irrigation API not available');
-      }
-    }
-
-    loadRemoteIrrigation();
-    const timer = window.setInterval(loadRemoteIrrigation, 10000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
 
   useEffect(() => {
     const shouldShowArrival =
@@ -232,44 +197,6 @@ function Home() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  async function updateRemoteIrrigation(enabled) {
-    setIrrigationLoading(true);
-    setIrrigationError('');
-    try {
-      const command = await setRemoteIrrigation(enabled);
-      setRemoteIrrigationState({
-        enabled: Boolean(command.enabled),
-        mode: command.mode || (command.enabled ? 'remote_on' : 'relay_logic'),
-        updated_at: command.updated_at || null,
-      });
-    } catch (error) {
-      setIrrigationError(error.message || 'Irrigation API not available');
-    } finally {
-      setIrrigationLoading(false);
-    }
-  }
-
-  function toggleRemoteIrrigation() {
-    updateRemoteIrrigation(!remoteIrrigation.enabled);
-  }
-
-  function irrigationRemoteStatus(remoteEnabled, irrigationActive) {
-    if (remoteEnabled) return 'REMOTE ON';
-    if (irrigationActive) return 'RELAY ON';
-    return 'RELAY LOGIC';
-  }
-
-  function irrigationRemoteDetail(remoteEnabled, irrigationActive, rainDetected, moistureValue) {
-    const moisture = toNumber(moistureValue);
-    if (irrigationError) return irrigationError;
-    if (irrigationLoading) return 'Syncing irrigation command';
-    if (remoteEnabled) return 'Pump command active';
-    if (rainDetected) return 'Relay logic holding - rain detected';
-    if (irrigationActive) return 'Relay logic active from field telemetry';
-    if (moisture !== null && moisture < 40) return `Relay logic ready - moisture ${compactValue(moisture)}%`;
-    return 'Relay logic monitoring field state';
-  }
-
   const sensorData = buildSensorData(latest);
   const healthScore = summary.healthScore;
   const healthDisplay = healthScore === null ? '--' : `${healthScore}%`;
@@ -280,11 +207,6 @@ function Home() {
   const cropStatus = insights?.crop_health?.status || 'Waiting';
   const networkStatus = connected ? 'UP' : 'WAIT';
   const alerts = buildAlerts(latest, insights, connected);
-  const irrigationActive = latest?.irrigation_active === true;
-  const rainDetected = latest?.rain_detected === true;
-  const remoteIrrigationEnabled = remoteIrrigation.enabled === true;
-  const irrigationDisplay = irrigationRemoteStatus(remoteIrrigationEnabled, irrigationActive);
-  const irrigationDetail = irrigationRemoteDetail(remoteIrrigationEnabled, irrigationActive, rainDetected, latest?.moisture);
 
   return (
     <div className={`container page-home ${showArrival ? 'page-home--arriving' : ''}`}>
@@ -374,51 +296,14 @@ function Home() {
             )}
           </div>
 
-          <div className="irrigation-control">
-            <div className="irr-header">
-              <span className="irr-label">Remote Irrigation</span>
-              <span className={`irr-val ${remoteIrrigationEnabled || irrigationActive ? 'active' : ''}`}>
-                {irrigationDisplay}
-              </span>
-            </div>
-            <div className="irr-auto-row">
-              <div className="irr-auto-copy">
-                <span><Zap size={14} aria-hidden="true" /> Pump command</span>
-                <small>{remoteIrrigationEnabled ? 'Remote start enabled' : 'Relay logic enabled'}</small>
-              </div>
-              <button
-                type="button"
-                className={`irr-auto-toggle ${remoteIrrigationEnabled ? 'is-on' : ''}`}
-                aria-label={remoteIrrigationEnabled ? 'Use relay irrigation logic' : 'Start irrigation remotely'}
-                aria-pressed={remoteIrrigationEnabled}
-                onClick={toggleRemoteIrrigation}
-                disabled={irrigationLoading}
-              >
-                <span className="irr-auto-thumb" aria-hidden="true" />
-              </button>
-            </div>
-            <div className="irr-options irr-options-remote" role="group" aria-label="Remote irrigation command">
-              {remoteIrrigationOptions.map((option) => (
-                <button
-                  type="button"
-                  key={String(option.value)}
-                  className={`irr-option ${remoteIrrigationEnabled === option.value ? 'active' : ''}`}
-                  onClick={() => updateRemoteIrrigation(option.value)}
-                  disabled={irrigationLoading}
-                >
-                  <span>{option.label}</span>
-                  <small>{option.detail}</small>
-                </button>
-              ))}
-            </div>
-            <div className={`irr-timer-detail ${rainDetected || irrigationError ? 'text-warning' : ''}`}>{irrigationDetail}</div>
-          </div>
+          <RemoteIrrigation demoMode={summary.demoMode} />
 
           <button className="btn btn-accent w-full mt-3" onClick={() => refreshInsights(true)}>Run FarmSense AI Diagnostic</button>
         </div>
       </div>
 
       <div className="sensor-section mt-4">
+        {latest?.available === false && <p className="text-warning" role="status">{latest.message || 'Live telemetry unavailable.'} Any readings shown are the last received values.</p>}
         <div className="sensor-section-header">
           <h2 className="section-title">Live Sensor Telemetry</h2>
           <div className="flex items-center gap-2">

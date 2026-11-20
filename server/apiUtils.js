@@ -3,7 +3,7 @@ export function json(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-export const DEFAULT_SENSOR_API_URL = 'https://sensor-data-7jqu.onrender.com/sensor-data';
+export const DEFAULT_SENSOR_API_URL = 'http://127.0.0.1:8000/sensor-data';
 export const DEFAULT_CROP_MODEL_API_URL = 'https://crop-model-api-1.onrender.com/predict';
 export const DEFAULT_IRRIGATION_API_URL = 'http://127.0.0.1:8000/irrigation-active';
 
@@ -37,8 +37,16 @@ export function unavailable(provider, message, extra = {}) {
   };
 }
 
-function localFallbacksEnabled() {
-  return process.env.VERCEL !== '1' && process.env.LOCAL_API_FALLBACKS !== 'false';
+export async function farmSenseFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    cache: 'no-store',
+    signal: AbortSignal.timeout(7000),
+    headers: {
+      ...options.headers,
+      ...(process.env.FARMSENSE_API_KEY ? { Authorization: `Bearer ${process.env.FARMSENSE_API_KEY}` } : {}),
+    },
+  });
 }
 
 function toNumber(value) {
@@ -71,8 +79,8 @@ function hasMeaningfulSensorValues(reading) {
     'health_score',
   ].some((key) => {
     const value = toNumber(reading[key]);
-    return value !== null && value !== 0;
-  }) || reading.rain_detected === true || reading.irrigation_active === true;
+    return value !== null;
+  }) || typeof reading.rain_detected === 'boolean' || typeof reading.irrigation_active === 'boolean';
 }
 
 export function normalizeSensorPayload(payload) {
@@ -91,8 +99,18 @@ export function normalizeSensorPayload(payload) {
     irrigation_active: toBoolean(data?.irrigation_active ?? data?.irrigationActive),
     health_score: toNumber(data?.health_score ?? data?.healthScore),
     timestamp: payload?.received_at || data?.timestamp || null,
-    source: 'hardware',
+    source: data?.source || payload?.source || 'hardware',
+    device_online: payload?.device_online ?? data?.device_online ?? null,
+    age_seconds: payload?.age_seconds ?? data?.age_seconds ?? null,
+    applied_command_id: data?.applied_command_id ?? null,
+    control_mode: data?.control_mode ?? null,
+    control_reason: data?.control_reason ?? null,
+    sensor_errors: data?.sensor_errors || [],
   };
+
+  if (payload?.available === false || data?.available === false) {
+    return unavailable('sensor', payload?.message || data?.message || 'Arduino telemetry unavailable', reading);
+  }
 
   if (!hasMeaningfulSensorValues(reading)) {
     return unavailable('sensor', 'Sensor API not available. No usable telemetry returned.', {
@@ -109,43 +127,6 @@ export function normalizeSensorPayload(payload) {
   };
 }
 
-let localIrrigationState = {
-  enabled: false,
-  mode: 'relay_logic',
-  updated_at: null,
-};
-
-function localSensorFallback(reason = '') {
-  const now = Date.now();
-  const slow = Math.sin(now / 420000);
-  const slower = Math.sin(now / 720000 + 1.4);
-  const moisture = Math.round(74 + slow * 4);
-  const ph = Math.round((6.5 + slower * 0.25) * 10) / 10;
-  const soilTemperature = Math.round((22.6 + slower * 0.4) * 10) / 10;
-  const airTemperature = Math.round((24.8 + slow * 0.3) * 10) / 10;
-  const humidity = Math.round(50 + slower * 4);
-
-  return {
-    available: true,
-    provider: 'local',
-    message: reason ? `Using local fallback: ${reason}` : null,
-    nitrogen: 34 + Math.round(slow * 2),
-    phosphorus: 22 + Math.round(slower),
-    potassium: 205 + Math.round(slow * 6),
-    moisture,
-    ph,
-    soil_temperature: soilTemperature,
-    air_temperature: airTemperature,
-    humidity,
-    pressure: Math.round((1011 + slower * 2) * 10) / 10,
-    rain_detected: false,
-    irrigation_active: localIrrigationState.enabled && moisture < 75,
-    health_score: 82,
-    timestamp: new Date().toISOString(),
-    source: 'local-fallback',
-  };
-}
-
 export async function fetchSensorLatest() {
   const url = process.env.SENSOR_API_URL || DEFAULT_SENSOR_API_URL;
   if (!url) {
@@ -155,14 +136,10 @@ export async function fetchSensorLatest() {
   }
 
   try {
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await farmSenseFetch(url);
     if (!response.ok) throw new Error(`Sensor API returned ${response.status}`);
     return normalizeSensorPayload(await response.json());
   } catch (error) {
-    if (localFallbacksEnabled()) {
-      return localSensorFallback(publicErrorMessage(error));
-    }
-
     return unavailable('sensor', `Sensor API not available: ${publicErrorMessage(error)}`, {
       source: 'none',
     });
@@ -170,18 +147,19 @@ export async function fetchSensorLatest() {
 }
 
 function normalizeIrrigationCommand(payload) {
-  if (typeof payload === 'boolean') {
-    return {
-      enabled: payload,
-      mode: payload ? 'remote_on' : 'relay_logic',
-      updated_at: null,
-    };
+  if (!payload || typeof payload !== 'object' || !['auto', 'off', 'remote_on'].includes(payload.mode)) {
+    throw new Error('Irrigation server returned an invalid command state');
   }
-
   return {
-    enabled: Boolean(payload?.enabled ?? payload?.value ?? payload?.remote_irrigation ?? payload?.irrigation_active),
-    mode: payload?.mode || ((payload?.enabled ?? payload?.value ?? payload?.remote_irrigation ?? payload?.irrigation_active) ? 'remote_on' : 'relay_logic'),
+    ...payload,
+    available: payload?.available !== false,
+    enabled: payload?.mode === 'remote_on',
+    mode: payload?.mode || 'off',
     updated_at: payload?.updated_at || null,
+    actual_irrigation_active: payload?.actual_irrigation_active ?? null,
+    applied: payload?.applied === true,
+    pending: payload?.pending !== false,
+    device_online: payload?.device_online === true,
   };
 }
 
@@ -192,57 +170,34 @@ function irrigationApiUrl() {
 export async function fetchRemoteIrrigation() {
   const url = irrigationApiUrl();
   try {
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await farmSenseFetch(url);
     if (!response.ok) throw new Error(`Irrigation API returned ${response.status}`);
-    localIrrigationState = normalizeIrrigationCommand(await response.json());
-    return localIrrigationState;
+    return normalizeIrrigationCommand(await response.json());
   } catch (error) {
-    if (localFallbacksEnabled()) {
-      return {
-        ...localIrrigationState,
-        available: true,
-        provider: 'local',
-        message: `Using local irrigation fallback: ${publicErrorMessage(error)}`,
-      };
-    }
-
     return unavailable('irrigation', `Irrigation API not available: ${publicErrorMessage(error)}`, {
       enabled: false,
-      mode: 'relay_logic',
+      mode: 'off',
+      actual_irrigation_active: null,
+      device_online: false,
       updated_at: null,
     });
   }
 }
 
-export async function sendRemoteIrrigation(enabled) {
+export async function sendRemoteIrrigation(command) {
   const url = irrigationApiUrl();
-  localIrrigationState = {
-    enabled: Boolean(enabled),
-    mode: enabled ? 'remote_on' : 'relay_logic',
-    updated_at: new Date().toISOString(),
-  };
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Boolean(enabled)),
-    });
-    if (!response.ok) throw new Error(`Irrigation API returned ${response.status}`);
-    localIrrigationState = normalizeIrrigationCommand(await response.json());
-    return localIrrigationState;
-  } catch (error) {
-    if (localFallbacksEnabled()) {
-      return {
-        ...localIrrigationState,
-        available: true,
-        provider: 'local',
-        message: `Using local irrigation fallback: ${publicErrorMessage(error)}`,
-      };
-    }
-
+  const response = await farmSenseFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(command),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(typeof payload.detail === 'string' ? payload.detail : `Irrigation API returned ${response.status}`);
+    error.status = response.status === 409 ? 409 : 502;
     throw error;
   }
+  return normalizeIrrigationCommand(payload);
 }
 
 export function normalizeCropPrediction(value) {

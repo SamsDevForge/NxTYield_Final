@@ -2,6 +2,8 @@
 
 An IoT-powered smart agriculture system combining soil and environmental monitoring, local and remote irrigation, ML-based crop recommendations, and a React dashboard with a digital farm twin.
 
+[See the dashboard](https://nxt-yield-final.vercel.app/) · [Local setup](#get-started) · [Firmware and wiring](hardware/README.md) · [Telemetry and irrigation API](backend/README.md)
+
 ## Achievement
 
 🏆 **1st Runner-Up | Makers Conclave, Hyderabad | ₹1,00,000 Prize Winner**
@@ -36,11 +38,15 @@ The Arduino only makes outbound requests. The browser uses NxTYield's existing A
 
 ## Get started
 
+**Explore without a device.** Start the frontend and select **Demo Mode** to see sample readings. Connect FastAPI and the Arduino to validate live telemetry and irrigation on your rig.
+
+**Connect the field unit.**
+
 1. **Start FastAPI:** follow the [backend setup guide](backend/README.md) to create private keys and run the service on port 8000.
 2. **Configure the dashboard:** copy [`.env.example`](.env.example) to `.env.local`, set its service URLs and keys, then run:
 
    ```bash
-   npm install
+   npm ci
    npm run dev
    ```
 
